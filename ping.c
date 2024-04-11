@@ -12,12 +12,19 @@
 //my mac address is 90-65-84-D0-AB-2F
 unsigned char mymac[6] = { 0xf2,0x3c,0x91,0xdb,0xc2,0x98 };
 //server's IP address, 4 because it is 4 bytes long
-unsigned char myip[4]= { 88,80,187,84};
+unsigned char myip[4]= { 88,80,187,84 };
+unsigned char netmask[4]= { 255,255,255,0 };
+unsigned char gateway[4]= { 88,80,187,1 };
 //another host in our network
-unsigned char dest_ip[4]= { 88,80,187,83};
+unsigned char dest_ip[4]= { 88,80,187,83 };
 unsigned char broadcast[6]={0xff,0xff,0xff,0xff,0xff,0xff};
 
 #define ETH_MTU 1500
+
+int s,i,t;
+int sll_len,len;
+struct sockaddr_ll sll;
+unsigned char l2buf[ETH_MTU];
 
 struct eth_frame {
     //dest MAC address
@@ -51,10 +58,11 @@ struct ip_datagram {
     unsigned int src;
     //destination IP address
     unsigned int dst;
+    unsigned char payload[1];
 };
 
 struct icmp_packet {
-    //Type: 8-request, 0-response
+    //Type: 8-echo request, 0-echo response
     unsigned char type;
     //Code: 0
     unsigned char code;
@@ -63,6 +71,7 @@ struct icmp_packet {
     //ID - to uniquelly identify different ping requests
     unsigned short id;
     //Sequence number - could be used for tracking realibility (loss of the packages)
+    //we increase it with every try to ping another node
     unsigned short seq;
     //data of the packet
     unsigned char payload[1];
@@ -118,14 +127,10 @@ void print_buffer(unsigned char * b, int s) {
 	printf("\n");
 }
 
-int s,i,t;
-int sll_len,len;
-struct sockaddr_ll sll;
-unsigned char l2buf[ETH_MTU];
-
 int resolve_ip(unsigned char* target_ip, unsigned char* target_mac) {
     struct eth_frame * eth;
     struct arp_packet * arp;
+    unsigned char l2buf[ETH_MTU];
     bzero(&sll,sizeof(struct sockaddr_ll));
     sll.sll_family=AF_PACKET;
     sll.sll_ifindex = if_nametoindex("eth0");
@@ -160,16 +165,89 @@ int resolve_ip(unsigned char* target_ip, unsigned char* target_mac) {
 }
 
 int main() {
+    struct eth_frame *eth;
+    struct ip_datagram *ip;
+    struct icmp_packet *icmp;
+    
     unsigned char dest_mac[6];
     s = socket (AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
-    if ( s == -1) {
+    if (s == -1) {
             perror("Socket Failed");
+            return 1;
+    }
+
+    eth = (struct eth_frame *) l2buf;
+    ip = (struct ip_datagram *) eth->payload;
+    icmp = (struct icmp_packet *) ip->payload;
+
+    //create an ICMP packet
+    //payload of ICMP is 20
+    forge_icmp(icmp, 20);
+    //create an IP packet
+    //28 = 20 payload of ICMP + 8 header of ICMP
+    //1 - protocol type value for ICMP
+    forge_ip(ip, 28, 1, dest_ip);
+    //create an ETHERNET packet
+
+    //we have to implement routing logic (routing table)
+    /*if our IP address masked is equal of IP dest address masked, we send it to the IP dest address
+    otherwise we send it to the gateway*/
+
+    //it is the same network as ours
+    if (*(unsigned int *)myip & *(unsigned int *)netmask == *(unsigned int *)dest_ip & *(unsigned int *)netmask)
+    {
+        resolve_ip(dest_ip, dest_mac);
+    }
+    else 
+    {
+        resolve_ip(gateway, dest_mac);
+    }
+
+    printf("Dest MAC\n");
+    print_buffer(dest_mac,6);
+
+    //0x0800 is for IP protocol
+    forge_eth(eth, dest_mac, 0x0800);
+
+    printf("Outgoing packet: ");
+
+    //14-ETH header length, 20-IP header length, 8-ICMP header length, 20-ICMP payload length
+    print_buffer(l2buf, 14+20+8+20);
+
+    bzero(&sll,sizeof(struct sockaddr_ll));
+    sll.sll_family=AF_PACKET;
+    sll.sll_ifindex = if_nametoindex("eth0");
+    sll_len=sizeof(struct sockaddr_ll);
+
+    t = sendto(s, l2buf, 14+20+8+20, 0, (struct sockaddr *) &sll, sll_len);
+
+    for (int i = 0 ; i < 100; i++) {
+        len = recvfrom(s, l2buf, ETH_MTU, 0, (struct  sockaddr *) & sll, &sll_len);
+        if (len == -1) {
+            perror("recvfrom failed");
             return 1;
         }
 
-    resolve_ip(dest_ip,dest_mac);
-    printf("Dest MAC\n");
-    print_buffer(dest_mac,6);
+        //check is it an IP packet
+        if (eth->type == htons(0x0800)) {
+            //check is it an ICMP packet
+            if (ip->proto == 1) {
+                //check is it an ICMP reply, an identifier of an ICMP reply and sequence of an ICMP reply
+                if (icmp->Type == 0 && icmp->id == htons(0xABCD) && icmp->seq==htons(1)) {
+                    printf("Echo reply\n");
+                    print_buffer(l2buf, 14+20+8+20);
+                    return 1;
+                }
+            }
+        }
+    }
+
+    //vi ping.c
+    //gcc ping.c -o ping
+    //!gcc
+    //./ping
+    //cd /CN24
+    //fg
 }
 
 
