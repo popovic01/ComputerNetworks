@@ -187,10 +187,9 @@ int main() {
     //28 = 20 payload of ICMP + 8 header of ICMP
     //1 - protocol type value for ICMP
     forge_ip(ip, 28, 1, dest_ip);
-    //create an ETHERNET packet
 
     //we have to implement routing logic (routing table)
-    /*if our IP address masked is equal of IP dest address masked, we send it to the IP dest address
+    /*if our IP address masked is equal of IP dest address masked, we send it to the IP dest address,
     otherwise we send it to the gateway*/
 
     //it is the same network as ours
@@ -198,7 +197,7 @@ int main() {
     {
         resolve_ip(dest_ip, dest_mac);
     }
-    else 
+    else //another network
     {
         resolve_ip(gateway, dest_mac);
     }
@@ -207,6 +206,7 @@ int main() {
     print_buffer(dest_mac,6);
 
     //0x0800 is for IP protocol
+    //create an ETHERNET packet
     forge_eth(eth, dest_mac, 0x0800);
 
     printf("Outgoing packet: ");
