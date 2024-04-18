@@ -61,6 +61,42 @@ struct ip_datagram {
     unsigned char payload[1];
 };
 
+//calculating the checksum
+unsigned short int checksum(void * ip, int len) {
+
+    unsigned int tot = 0;
+    unsigned short * p;
+    int i;
+    p = (unsigned short *) ip;
+
+    for (i = 0; i < len / 2 ; i++) {
+        tot = tot + htons(p[i]);
+        if (tot & 0x10000) tot = (tot+1) & 0xFFFF;
+    }
+
+    if (i * 2 < len) {
+        tot = tot + htons(p[i]) & 0xFF00;
+        if (tot & 0x10000) tot = (tot+1) & 0xFFFF;
+    }
+
+    return  (0xFFFF-(unsigned short)tot);
+}
+
+//creating an ip packet
+void forge_ip(struct ip_datagram * ip, unsigned short int payloadsize, unsigned char protocol, unsigned char * dest) {
+    ip -> ver_ihl = 0x45; //ip version and header length
+    ip -> tos = 0; //type of service
+    ip -> totlen = htons(payloadsize + 20); //total length
+    ip -> id = htons(0x1234); //we set id to 1234
+    ip -> flags_offs = 0;
+    ip -> ttl = 15; //time to live
+    ip -> proto = protocol;
+    ip -> checksum = htons(0);
+    ip -> src = *(unsigned int *)myip;
+    ip -> dst = *(unsigned int *)dest;
+    ip -> checksum = htons(checksum(ip, 20));
+}
+
 struct icmp_packet {
     //Type: 8-echo request, 0-echo response
     unsigned char type;
@@ -76,6 +112,20 @@ struct icmp_packet {
     //data of the packet
     unsigned char payload[1];
 };
+
+void forge_icmp(struct icmp_packet * icmp, int payloadsize) {
+
+    icmp -> type = 8;
+    icmp -> code = 0;
+    icmp -> checksum = htons(0);
+    icmp -> id = htons(0xABCD); //we set id to ABCD
+    icmp -> seq = htons(1);
+
+    for (int i = 0; i < payloadsize; i++)
+            icmp -> payload[i] = i % 0xFF;
+
+    icmp -> checksum = htons(checksum(icmp, payloadsize+8)); //calling the same checksum method
+}
 
 struct arp_packet {
     //type of layer 2 protocol
@@ -100,9 +150,9 @@ struct arp_packet {
 
 void forge_eth (struct eth_frame * e, unsigned char * dest, unsigned short type)
 {
-    for (int i = 0; i < 6; i++) e->dest[i] = dest[i];
-    for (int i = 0; i < 6; i++) e->src[i] = mymac[i];
-    e->type = htons(type);
+    for (int i = 0; i < 6; i++) e -> dest[i] = dest[i];
+    for (int i = 0; i < 6; i++) e -> src[i] = mymac[i];
+    e -> type = htons(type);
 }
 
 void forge_arp_req(struct arp_packet * a, unsigned char * targetip) {
